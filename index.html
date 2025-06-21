@@ -633,6 +633,17 @@
     </div>
   </div>
 
+  <!-- Vista simplificada de receta (modal) -->
+  <div id="recipeViewModal" class="modal">
+    <div class="modal-content w-full max-w-lg p-6">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-xl font-bold" id="recipeViewTitle"></h3>
+        <button class="close-modal text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button>
+      </div>
+      <div id="recipeViewBody"></div>
+    </div>
+  </div>
+
   <script>
     document.addEventListener('DOMContentLoaded', function() {
       // Data storage
@@ -729,9 +740,6 @@
             <span class="step-number w-8 h-8 bg-pink-100 rounded-full flex items-center justify-center text-pink-700 font-medium">1</span>
             <textarea class="step-description flex-grow px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-pink-300" 
               placeholder="Instrucción" rows="2"></textarea>
-            <button type="button" class="remove-step text-red-500 hover:text-red-700">
-              <i class="fas fa-times-circle"></i>
-            </button>
           </div>
         `;
         
@@ -748,6 +756,8 @@
       });
       
       // Add ingredient
+      let lastSelectedUnit = 'g'; // Default unit
+
       document.getElementById('addIngredientBtn').addEventListener('click', () => {
         const ingredientsList = document.getElementById('ingredientsList');
         const newIngredient = document.createElement('div');
@@ -766,24 +776,70 @@
             </button>
           </div>
           <select class="ingredient-unit px-2 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-pink-300">
-            <option value="g">g</option>
-            <option value="ml">ml</option>
-            <option value="cda">cda</option>
-            <option value="cdta">cdta</option>
-            <option value="unidades">unidades</option>
-            <option value="tazas">tazas</option>
-            <option value="pizca">pizca</option>
+            <option value="g" ${lastSelectedUnit==='g'?'selected':''}>g</option>
+            <option value="ml" ${lastSelectedUnit==='ml'?'selected':''}>ml</option>
+            <option value="cda" ${lastSelectedUnit==='cda'?'selected':''}>cda</option>
+            <option value="cdta" ${lastSelectedUnit==='cdta'?'selected':''}>cdta</option>
+            <option value="unidades" ${lastSelectedUnit==='unidades'?'selected':''}>unidades</option>
+            <option value="tazas" ${lastSelectedUnit==='tazas'?'selected':''}>tazas</option>
+            <option value="pizca" ${lastSelectedUnit==='pizca'?'selected':''}>pizca</option>
           </select>
           <button type="button" class="remove-ingredient text-red-500 hover:text-red-700">
             <i class="fas fa-times-circle"></i>
           </button>
         `;
         ingredientsList.appendChild(newIngredient);
-        
+
         // Add remove functionality
         newIngredient.querySelector('.remove-ingredient').addEventListener('click', function() {
           this.closest('.ingredient-item').remove();
         });
+
+        // Unidad predeterminada
+        const unitSelect = newIngredient.querySelector('.ingredient-unit');
+        unitSelect.value = lastSelectedUnit;
+        unitSelect.addEventListener('change', function() {
+          lastSelectedUnit = this.value;
+        });
+
+        // Sumar/restar cantidad según unidad
+        const amountInput = newIngredient.querySelector('.ingredient-amount');
+        const decreaseBtn = newIngredient.querySelector('.decrease-amount');
+        const increaseBtn = newIngredient.querySelector('.increase-amount');
+
+        function getStep(unit) {
+          if (unit === 'ml' || unit === 'g') return 10;
+          if (unit === 'unidades') return 1;
+          if (unit === 'cda' || unit === 'cdta' || unit === 'tazas') return 1;
+          return 1;
+        }
+
+        function changeAmount(delta) {
+          let value = parseInt(amountInput.value) || 0;
+          const step = getStep(unitSelect.value);
+          value += delta * step;
+          if (value < 0) value = 0;
+          amountInput.value = value;
+        }
+
+        let interval;
+        function startChange(delta) {
+          changeAmount(delta);
+          interval = setInterval(() => changeAmount(delta), 150);
+        }
+        function stopChange() {
+          clearInterval(interval);
+        }
+
+        decreaseBtn.addEventListener('mousedown', () => startChange(-1));
+        decreaseBtn.addEventListener('mouseup', stopChange);
+        decreaseBtn.addEventListener('mouseleave', stopChange);
+        decreaseBtn.addEventListener('click', () => changeAmount(-1));
+
+        increaseBtn.addEventListener('mousedown', () => startChange(1));
+        increaseBtn.addEventListener('mouseup', stopChange);
+        increaseBtn.addEventListener('mouseleave', stopChange);
+        increaseBtn.addEventListener('click', () => changeAmount(1));
       });
       
       // Add step
@@ -818,14 +874,16 @@
       // Save recipe
       recipeForm.addEventListener('submit', function(e) {
         e.preventDefault();
-        
+
         // Gather form data
         const recipeId = document.getElementById('recipeId').value || Date.now().toString();
         const name = document.getElementById('recipeName').value;
-        const category = document.getElementById('recipeCategory').value;
+        // Split categories by comma, trim, and store as array
+        const categoryInput = document.getElementById('recipeCategory').value;
+        const categories = categoryInput.split(',').map(c => c.trim()).filter(Boolean);
         const description = document.getElementById('recipeDescription').value;
         const image = document.getElementById('recipeImage').value || 'https://cdn.pixabay.com/photo/2016/11/29/11/38/cake-1869227_960_720.jpg';
-        
+
         // Get time based on selected option
         let time;
         if (exactTimeOption.checked) {
@@ -846,8 +904,9 @@
         document.querySelectorAll('.ingredient-item').forEach(item => {
           const name = item.querySelector('.ingredient-name').value;
           const amount = item.querySelector('.ingredient-amount').value;
+          const unit = item.querySelector('.ingredient-unit').value;
           if (name) {
-            ingredients.push({ name, amount });
+            ingredients.push({ name, amount, unit });
           }
         });
         
@@ -864,7 +923,7 @@
         const recipe = {
           id: recipeId,
           name,
-          category,
+          categories, // now array
           description,
           image,
           time,
@@ -891,23 +950,19 @@
         recipeFormModal.classList.remove('show');
       });
       
-      // Edit recipe
+      // Al editar receta, soportar categorías y unidades
       function setupEditButtons() {
         document.querySelectorAll('.edit-recipe-btn').forEach(button => {
           button.addEventListener('click', function() {
             const recipeId = this.getAttribute('data-id');
             const recipe = recipes.find(r => r.id === recipeId);
-            
             if (!recipe) return;
-            
-            // Fill form with recipe data
             document.getElementById('recipeFormTitle').textContent = 'Editar Receta';
             document.getElementById('recipeId').value = recipe.id;
             document.getElementById('recipeName').value = recipe.name;
-            document.getElementById('recipeCategory').value = recipe.category;
+            document.getElementById('recipeCategory').value = (recipe.categories||[]).join(', ');
             document.getElementById('recipeDescription').value = recipe.description;
             document.getElementById('recipeImage').value = recipe.image;
-            
             // Set time values
             if (recipe.time) {
               if (recipe.time.type === 'exact') {
@@ -923,11 +978,10 @@
                 document.getElementById('recipeTimeMax').value = recipe.time.max;
               }
             }
-            
             // Set ingredients
             const ingredientsList = document.getElementById('ingredientsList');
             ingredientsList.innerHTML = '';
-            recipe.ingredients.forEach(ingredient => {
+            (recipe.ingredients||[]).forEach(ingredient => {
               const ingredientItem = document.createElement('div');
               ingredientItem.className = 'ingredient-item flex gap-2';
               ingredientItem.innerHTML = `
@@ -957,17 +1011,54 @@
                 </button>
               `;
               ingredientsList.appendChild(ingredientItem);
-              
-              // Add remove functionality
+              // Unidad predeterminada
+              const unitSelect = ingredientItem.querySelector('.ingredient-unit');
+              unitSelect.value = ingredient.unit || 'g';
+              unitSelect.addEventListener('change', function() {
+                lastSelectedUnit = this.value;
+              });
+              // Sumar/restar cantidad según unidad
+              const amountInput = ingredientItem.querySelector('.ingredient-amount');
+              const decreaseBtn = ingredientItem.querySelector('.decrease-amount');
+              const increaseBtn = ingredientItem.querySelector('.increase-amount');
+              function getStep(unit) {
+                if (unit === 'ml' || unit === 'g') return 10;
+                if (unit === 'unidades') return 1;
+                if (unit === 'cda' || unit === 'cdta' || unit === 'tazas') return 1;
+                return 1;
+              }
+              function changeAmount(delta) {
+                let value = parseInt(amountInput.value) || 0;
+                const step = getStep(unitSelect.value);
+                value += delta * step;
+                if (value < 0) value = 0;
+                amountInput.value = value;
+              }
+              let interval;
+              function startChange(delta) {
+                changeAmount(delta);
+                interval = setInterval(() => changeAmount(delta), 150);
+              }
+              function stopChange() {
+                clearInterval(interval);
+              }
+              decreaseBtn.addEventListener('mousedown', () => startChange(-1));
+              decreaseBtn.addEventListener('mouseup', stopChange);
+              decreaseBtn.addEventListener('mouseleave', stopChange);
+              decreaseBtn.addEventListener('click', () => changeAmount(-1));
+              increaseBtn.addEventListener('mousedown', () => startChange(1));
+              increaseBtn.addEventListener('mouseup', stopChange);
+              increaseBtn.addEventListener('mouseleave', stopChange);
+              increaseBtn.addEventListener('click', () => changeAmount(1));
+              // Remove
               ingredientItem.querySelector('.remove-ingredient').addEventListener('click', function() {
                 this.closest('.ingredient-item').remove();
               });
             });
-            
             // Set steps
             const stepsList = document.getElementById('stepsList');
             stepsList.innerHTML = '';
-            recipe.steps.forEach((step, index) => {
+            (recipe.steps||[]).forEach((step, index) => {
               const stepItem = document.createElement('div');
               stepItem.className = 'step-item flex gap-2';
               stepItem.innerHTML = `
@@ -979,18 +1070,13 @@
                 </button>
               `;
               stepsList.appendChild(stepItem);
-              
-              // Add remove functionality
               stepItem.querySelector('.remove-step').addEventListener('click', function() {
                 this.closest('.step-item').remove();
-                // Renumber steps
-                document.querySelectorAll('.step-number').forEach((span, index) => {
-                  span.textContent = index + 1;
+                document.querySelectorAll('.step-number').forEach((span, idx) => {
+                  span.textContent = idx + 1;
                 });
               });
             });
-            
-            // Show modal
             recipeFormModal.classList.add('show');
           });
         });
@@ -1010,10 +1096,68 @@
         });
       }
       
+      // Vista simplificada de receta (modal)
+      let recipeViewModal;
+      if (!document.getElementById('recipeViewModal')) {
+        recipeViewModal = document.createElement('div');
+        recipeViewModal.id = 'recipeViewModal';
+        recipeViewModal.className = 'modal';
+        recipeViewModal.innerHTML = `
+          <div class="modal-content w-full max-w-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="text-xl font-bold" id="recipeViewTitle"></h3>
+              <button class="close-modal text-gray-500 hover:text-gray-700"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div id="recipeViewBody"></div>
+          </div>
+        `;
+        document.body.appendChild(recipeViewModal);
+        recipeViewModal.querySelector('.close-modal').addEventListener('click', () => recipeViewModal.classList.remove('show'));
+      }
+
+      function setupViewButtons() {
+        document.querySelectorAll('.view-recipe-btn').forEach(button => {
+          button.addEventListener('click', function() {
+            const recipeId = this.getAttribute('data-id');
+            const recipe = recipes.find(r => r.id === recipeId);
+            if (!recipe) return;
+            document.getElementById('recipeViewTitle').textContent = recipe.name;
+            let html = '';
+            html += `<div class='mb-4'><strong>Ingredientes:</strong><ul class='list-disc pl-6'>`;
+            (recipe.ingredients||[]).forEach(ing => {
+              html += `<li>${ing.amount} ${ing.unit||''} ${ing.name}</li>`;
+            });
+            html += '</ul></div>';
+            html += `<div class='mb-4'><strong>Pasos:</strong><ol class='list-decimal pl-6'>`;
+            (recipe.steps||[]).forEach(step => {
+              html += `<li>${step}</li>`;
+            });
+            html += '</ol></div>';
+            recipeViewModal.querySelector('#recipeViewBody').innerHTML = html;
+            recipeViewModal.classList.add('show');
+          });
+        });
+      }
+      
       // Render recipes
       function renderRecipes() {
         recipesGrid.innerHTML = '';
-        
+
+        // Actualizar filtro de categorías dinámicamente
+        const categoryFilter = document.getElementById('categoryFilter');
+        // Obtener todas las categorías únicas
+        let allCategories = [];
+        recipes.forEach(r => {
+          if (Array.isArray(r.categories)) {
+            allCategories = allCategories.concat(r.categories);
+          } else if (r.category) {
+            allCategories = allCategories.concat(r.category.split(',').map(c => c.trim()));
+          }
+        });
+        allCategories = Array.from(new Set(allCategories.filter(Boolean)));
+        categoryFilter.innerHTML = '<option value="">Todas las categorías</option>' +
+          allCategories.map(cat => `<option value="${cat}">${cat.charAt(0).toUpperCase() + cat.slice(1)}</option>`).join('');
+
         if (recipes.length === 0) {
           recipesGrid.innerHTML = `
             <div class="col-span-full text-center py-8">
@@ -1025,22 +1169,44 @@
               </button>
             </div>
           `;
-          
           document.getElementById('emptyAddRecipeBtn').addEventListener('click', function() {
             addRecipeBtn.click();
           });
-          
           return;
         }
-        
-        recipes.forEach(recipe => {
+
+        // Filtro de búsqueda y categoría
+        const searchValue = document.getElementById('recipeSearch').value.toLowerCase();
+        const selectedCategory = categoryFilter.value;
+
+        let filteredRecipes = recipes.filter(recipe => {
+          // Filtro por búsqueda (nombre o ingrediente)
+          const nameMatch = recipe.name.toLowerCase().includes(searchValue);
+          const ingredientMatch = recipe.ingredients && recipe.ingredients.some(ing => ing.name.toLowerCase().includes(searchValue));
+          // Filtro por categoría
+          let categoryMatch = true;
+          if (selectedCategory) {
+            if (Array.isArray(recipe.categories)) {
+              categoryMatch = recipe.categories.includes(selectedCategory);
+            } else if (recipe.category) {
+              categoryMatch = recipe.category.split(',').map(c => c.trim()).includes(selectedCategory);
+            }
+          }
+          return (nameMatch || ingredientMatch) && categoryMatch;
+        });
+
+        if (filteredRecipes.length === 0) {
+          recipesGrid.innerHTML = `<div class="col-span-full text-center py-8 text-gray-400">No se encontraron recetas.</div>`;
+          return;
+        }
+
+        filteredRecipes.forEach(recipe => {
           let timeDisplay = 'N/A';
           if (recipe.time) {
             timeDisplay = recipe.time.type === 'exact' 
               ? `${recipe.time.value} min` 
               : `${recipe.time.min}-${recipe.time.max} min`;
           }
-          
           const recipeCard = document.createElement('div');
           recipeCard.className = 'recipe-card card';
           recipeCard.innerHTML = `
@@ -1049,7 +1215,7 @@
               <div class="flex justify-between items-start mb-2">
                 <h3 class="font-bold text-lg">${recipe.name}</h3>
                 <div class="flex gap-1">
-                  <span class="badge badge-primary">${getCategoryLabel(recipe.category)}</span>
+                  ${(recipe.categories||[]).map(cat => `<span class='badge badge-primary'>${cat}</span>`).join('')}
                 </div>
               </div>
               <p class="text-gray-600 mb-3 text-sm">${recipe.description}</p>
@@ -1065,41 +1231,24 @@
                   <button class="p-2 hover:bg-gray-100 rounded-full delete-recipe-btn" data-id="${recipe.id}">
                     <i class="fas fa-trash"></i>
                   </button>
+                  <button class="p-2 hover:bg-pink-100 rounded-full view-recipe-btn" data-id="${recipe.id}">
+                    <i class="fas fa-eye"></i>
+                  </button>
                 </div>
               </div>
             </div>
           `;
-          
           recipesGrid.appendChild(recipeCard);
         });
         
         setupEditButtons();
         setupDeleteButtons();
+        setupViewButtons();
       }
       
-      // Helper function to get category label
-      function getCategoryLabel(category) {
-        const categories = {
-          'postres': 'Postres',
-          'panes': 'Panes',
-          'galletas': 'Galletas',
-          'tartas': 'Tartas',
-          'otros': 'Otros'
-        };
-        return categories[category] || 'Otros';
-      }
-      
-      // Wishlist section functionality
-      document.querySelectorAll('[data-toggle]').forEach(toggle => {
-        toggle.addEventListener('click', function() {
-          const targetId = this.getAttribute('data-toggle');
-          const targetElement = document.getElementById(targetId);
-          const icon = this.querySelector('.toggle-animation');
-          
-          targetElement.classList.toggle('hidden');
-          icon.classList.toggle('rotate-180');
-        });
-      });
+      // Filtros y búsqueda en tiempo real
+      categoryFilter.addEventListener('change', renderRecipes);
+      document.getElementById('recipeSearch').addEventListener('input', renderRecipes);
       
       // Save all data functionality
       document.getElementById('saveAllDataBtn').addEventListener('click', function() {
@@ -1111,8 +1260,173 @@
         alert('Todos los datos han sido guardados correctamente');
       });
       
-      // Initialize the app
-      renderRecipes();
+      // Inicializar galería
+      function renderGallery() {
+        galleryGrid.innerHTML = '';
+        let visibleGallery = gallery.filter(item => item.visible !== false);
+        if (visibleGallery.length === 0) {
+          galleryGrid.innerHTML = `<div class='col-span-full text-center text-gray-400 py-8'>No hay fotos en la galería.</div>`;
+          return;
+        }
+        visibleGallery.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'gallery-item card';
+          card.innerHTML = `
+            <img src="${item.url}" alt="${item.title}" class="w-full gallery-thumb">
+            <div class="p-3">
+              <div class="flex justify-between items-center mb-1">
+                <h4 class="font-bold">${item.title}</h4>
+                <button class="delete-photo-btn text-red-400 hover:text-red-600" data-id="${item.id}"><i class="fas fa-trash"></i></button>
+              </div>
+              <p class="text-xs text-gray-500 mb-1">${item.description}</p>
+              <div class="text-xs text-gray-400">Subida: ${new Date(item.createdAt).toLocaleDateString()}</div>
+            </div>
+          `;
+          card.querySelector('.delete-photo-btn').addEventListener('click', function() {
+            if (confirm('¿Eliminar esta foto de la galería?')) {
+              const id = this.getAttribute('data-id');
+              const idx = gallery.findIndex(g => g.id === id);
+              if (idx >= 0) {
+                gallery.splice(idx, 1);
+                localStorage.setItem('gallery', JSON.stringify(gallery));
+                renderGallery();
+              }
+            }
+          });
+          galleryGrid.appendChild(card);
+        });
+      }
+      
+      // Galería de fotos
+      const galleryGrid = document.getElementById('galleryGrid');
+      const addPhotoBtn = document.getElementById('addPhotoBtn');
+      const photoFormModal = document.getElementById('photoFormModal');
+      const photoForm = document.getElementById('photoForm');
+
+      addPhotoBtn.addEventListener('click', () => {
+        photoForm.reset();
+        photoFormModal.classList.add('show');
+      });
+
+      document.querySelectorAll('#photoFormModal .close-modal').forEach(btn => {
+        btn.addEventListener('click', () => photoFormModal.classList.remove('show'));
+      });
+
+      photoForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const title = document.getElementById('photoTitle').value;
+        const description = document.getElementById('photoDescription').value;
+        const url = document.getElementById('photoURL').value;
+        const createdAt = new Date().toISOString();
+        gallery.push({ id: Date.now().toString(), title, description, url, createdAt, visible: true });
+        localStorage.setItem('gallery', JSON.stringify(gallery));
+        renderGallery();
+        photoFormModal.classList.remove('show');
+      });
+      
+      // Lista de deseos
+      const addWishBtn = document.getElementById('addWishBtn');
+      const wishFormModal = document.getElementById('wishFormModal');
+      const wishForm = document.getElementById('wishForm');
+
+      addWishBtn.addEventListener('click', () => {
+        wishForm.reset();
+        wishFormModal.classList.add('show');
+      });
+
+      document.querySelectorAll('#wishFormModal .close-modal').forEach(btn => {
+        btn.addEventListener('click', () => wishFormModal.classList.remove('show'));
+      });
+
+      wishForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        const category = document.getElementById('wishCategory').value;
+        const title = document.getElementById('wishTitle').value;
+        const notes = document.getElementById('wishNotes').value;
+        const wish = { id: Date.now().toString(), title, notes, completed: false };
+        wishlist[category].unshift(wish);
+        localStorage.setItem('wishlist', JSON.stringify(wishlist));
+        renderWishlist();
+        wishFormModal.classList.remove('show');
+      });
+
+      function renderWishlist() {
+        ['cook','restaurant','ingredients'].forEach(cat => {
+          const container = document.getElementById('wishlist-' + cat);
+          if (!container) return;
+          container.innerHTML = '';
+          let wishes = wishlist[cat] || [];
+          // Mostrar solo los no completados primero, luego los completados (máx 5 visibles completados)
+          const notCompleted = wishes.filter(w => !w.completed);
+          const completed = wishes.filter(w => w.completed).slice(0, 5);
+          notCompleted.concat(completed).forEach(wish => {
+            const item = document.createElement('div');
+            item.className = 'wishlist-item p-3 flex items-center gap-3' + (wish.completed ? ' completed-item' : '');
+            item.innerHTML = `
+              <input type="checkbox" class="wishlist-checkbox" ${wish.completed ? 'checked' : ''}>
+              <div>
+                <h4 class="font-medium">${wish.title}</h4>
+                <p class="text-sm text-gray-500">${wish.notes}</p>
+              </div>
+              <button class="remove-wish-btn ml-auto text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>
+            `;
+            // Tachar al completar
+            item.querySelector('.wishlist-checkbox').addEventListener('change', function() {
+              wish.completed = this.checked;
+              localStorage.setItem('wishlist', JSON.stringify(wishlist));
+              renderWishlist();
+            });
+            // Eliminar deseo
+            item.querySelector('.remove-wish-btn').addEventListener('click', function() {
+              if (confirm('¿Eliminar este deseo?')) {
+                wishlist[cat] = wishlist[cat].filter(w => w.id !== wish.id);
+                localStorage.setItem('wishlist', JSON.stringify(wishlist));
+                renderWishlist();
+              }
+            });
+            container.appendChild(item);
+          });
+          // Si hay más completados, mostrar botón para ver más
+          if (wishes.filter(w => w.completed).length > 5) {
+            const btn = document.createElement('button');
+            btn.className = 'text-xs text-pink-500 hover:underline mt-2';
+            btn.textContent = 'Mostrar todos los completados';
+            btn.addEventListener('click', function() {
+              wishlist[cat].forEach(w => w.showAll = true);
+              container.innerHTML = '';
+              wishes.forEach(wish => {
+                const item = document.createElement('div');
+                item.className = 'wishlist-item p-3 flex items-center gap-3' + (wish.completed ? ' completed-item' : '');
+                item.innerHTML = `
+                  <input type="checkbox" class="wishlist-checkbox" ${wish.completed ? 'checked' : ''}>
+                  <div>
+                    <h4 class="font-medium">${wish.title}</h4>
+                    <p class="text-sm text-gray-500">${wish.notes}</p>
+                  </div>
+                  <button class="remove-wish-btn ml-auto text-red-400 hover:text-red-600"><i class="fas fa-trash"></i></button>
+                `;
+                item.querySelector('.wishlist-checkbox').addEventListener('change', function() {
+                  wish.completed = this.checked;
+                  localStorage.setItem('wishlist', JSON.stringify(wishlist));
+                  renderWishlist();
+                });
+                item.querySelector('.remove-wish-btn').addEventListener('click', function() {
+                  if (confirm('¿Eliminar este deseo?')) {
+                    wishlist[cat] = wishlist[cat].filter(w => w.id !== wish.id);
+                    localStorage.setItem('wishlist', JSON.stringify(wishlist));
+                    renderWishlist();
+                  }
+                });
+                container.appendChild(item);
+              });
+            });
+            container.appendChild(btn);
+          }
+        });
+      }
+      
+      // Inicializar deseos
+      renderWishlist();
       
       // Dark mode toggle functionality
       const darkModeToggle = document.getElementById('darkModeToggle');
